@@ -50,23 +50,29 @@ KNOWLEDGE_FILE = os.path.join(BASE_DIR, "fastflow_knowledge.json")
 DEFAULT_HF_MODEL = "rinna/gemma-2-baku-2b-it"
 
 MODEL_DIR = os.path.join(BASE_DIR, "models", "gemma-2-baku-2b-it")
-LORA_DIR = os.path.join(BASE_DIR, "models", "dgemma_lora_ja_clean")
-if not os.path.exists(LORA_DIR):
-    LORA_DIR = os.path.join(BASE_DIR, "models", "dgemma_lora_home")
-
 if not os.path.exists(MODEL_DIR):
     STUDIO33_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "33_Aria_Diffusion_Qwen_Super_Fast_Studio"))
     candidate_model = os.path.join(STUDIO33_DIR, "models", "gemma-2-baku-2b-it")
     if os.path.exists(candidate_model):
         MODEL_DIR = candidate_model
     else:
-        # ローカルに存在しない場合は Hugging Face Hub から自動ダウンロード
         MODEL_DIR = DEFAULT_HF_MODEL
 
-    if not os.path.exists(LORA_DIR):
-        candidate_lora = os.path.join(STUDIO33_DIR, "models", "dgemma_lora_home")
-        if os.path.exists(candidate_lora):
-            LORA_DIR = candidate_lora
+# LoRA候補ディレクトリの決定論的走査（Studio 34クリーン版優先 ➔ 既存版）
+lora_candidates = [
+    os.path.join(BASE_DIR, "models", "dgemma_lora_ja_clean"),
+    os.path.join(BASE_DIR, "models", "dgemma_lora_home"),
+    os.path.abspath(os.path.join(BASE_DIR, "..", "33_Aria_Diffusion_Qwen_Super_Fast_Studio", "models", "dgemma_lora_home")),
+]
+LORA_DIR = None
+for cand in lora_candidates:
+    if os.path.exists(cand) and (
+        os.path.exists(os.path.join(cand, "adapter_config.json")) or
+        os.path.exists(os.path.join(cand, "adapter_model.safetensors")) or
+        os.path.exists(os.path.join(cand, "adapter_model.bin"))
+    ):
+        LORA_DIR = cand
+        break
 
 # ANSI カラー
 C_ROSE = "\033[38;2;255;105;180m"
@@ -691,14 +697,10 @@ def main():
     mask_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
     dlm = DiffusionGemmaLM(base_model, tokenizer, mask_token_id=mask_token_id)
 
-    has_lora = os.path.exists(LORA_DIR) and (
-        os.path.exists(os.path.join(LORA_DIR, "adapter_config.json")) or
-        os.path.exists(os.path.join(LORA_DIR, "adapter_model.safetensors")) or
-        os.path.exists(os.path.join(LORA_DIR, "adapter_model.bin"))
-    )
+    has_lora = (LORA_DIR is not None)
 
     if has_lora:
-        print(f"{C_CYAN}[2/2] Attaching LoRA & Mask Embeddings...{C_RESET}")
+        print(f"{C_CYAN}[2/2] Attaching LoRA & Mask Embeddings ({os.path.basename(LORA_DIR)})...{C_RESET}")
         try:
             dlm.model = PeftModel.from_pretrained(dlm.model, LORA_DIR)
             dlm.eval()
@@ -709,10 +711,13 @@ def main():
                     dlm.mask_embed.data.copy_(extras["mask_embed"].to("cuda", dtype=torch.bfloat16))
             dlm.mask_embed.data = dlm.mask_embed.data.to("cuda")
         except Exception as e:
-            print(f"{C_GOLD}⚠️ LoRAのロードをスキップし、Pureモードで起動します: {e}{C_RESET}")
+            print(f"{C_GOLD}⚠️ LoRAのロードに失敗したため、自動的に【LoRA OFF (Pureモード)】で起動します: {e}{C_RESET}")
             has_lora = False
     else:
-        print(f"{C_GOLD}[2/2] 拡散LoRA未検出 ➔ 【Pure Gemma-2 ✕ 早大粘菌流速シフォン直結モード】で起動します🌸{C_RESET}")
+        print(f"{C_GREEN}[2/2] 💡 LoRAファイル未検出 ➔ 自動的に【LoRA OFF (Pure Gemma-2 ✕ 流速シフォン直結モード)】で起動します🌸{C_RESET}")
+
+    # 初期因果マスク設定 (LoRA OFF時は純粋なCausal自己回帰として動作)
+    patch_gemma_causal(base_model, is_causal=(not has_lora))
 
     drafter = FastDiffusionRAGDrafter(tokenizer, json_path=KNOWLEDGE_FILE)
     siphon = PhysarumFluxSiphon(knowledge_file=KNOWLEDGE_FILE)
@@ -758,16 +763,20 @@ def main():
         if user_input.startswith("/lora"):
             parts = user_input.split()
             if len(parts) > 1 and parts[1].lower() in ("on", "off"):
-                use_lora_mode = (parts[1].lower() == "on")
-                if not use_lora_mode:
-                    print(f"{C_GREEN}👑 【脱LoRA完了】Pure Gemma-2 ✕ 流速シフォン直結モードに切り替えました！{C_RESET}")
-                    print(f"  ・素のGemma-2知能100%解放（語彙・推論・文脈破綻ゼロ）")
-                    print(f"  ・知識は早大粘菌流速シフォンからナノ秒吸引＆PLD投機加速 ⚡")
+                target_mode = (parts[1].lower() == "on")
+                if target_mode and not has_lora:
+                    print(f"{C_GOLD}⚠️ LoRAファイルが存在しないため、LoRA ONにはできません。Pure Gemma-2モードを維持します。{C_RESET}\n")
                 else:
-                    print(f"{C_ROSE}🌸 拡散LoRAモードに切り替えました（双方向マスク拡散検証）。{C_RESET}")
+                    use_lora_mode = target_mode
+                    if not use_lora_mode:
+                        print(f"{C_GREEN}👑 【脱LoRA完了】Pure Gemma-2 ✕ 流速シフォン直結モードに切り替えました！{C_RESET}")
+                        print(f"  ・素のGemma-2知能100%解放（語彙・推論・文脈破綻ゼロ）")
+                        print(f"  ・知識は早大粘菌流速シフォンからナノ秒吸引＆PLD投機加速 ⚡\n")
+                    else:
+                        print(f"{C_ROSE}🌸 拡散LoRAモードに切り替えました（双方向マスク拡散検証）。{C_RESET}\n")
             else:
                 curr_str = f"{C_ROSE}拡散LoRA (ON){C_RESET}" if use_lora_mode else f"{C_GREEN}Pure Gemma-2 ✕ 流速シフォン直結 (OFF / 推奨){C_RESET}"
-                print(f"{C_GOLD}現在のモード: {curr_str} (指定可能: /lora off | /lora on){C_RESET}")
+                print(f"{C_GOLD}現在のモード: {curr_str} (指定可能: /lora off | /lora on){C_RESET}\n")
             continue
 
         # 🍄 流速シフォン確認・追加コマンド (/siphon)

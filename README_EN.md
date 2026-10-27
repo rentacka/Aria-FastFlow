@@ -38,8 +38,10 @@ Simply **double-click the batch file** inside this folder to launch!
   👉 Double-click `1_Start_Aria_FastFlow.bat`
 
 A lovely dark & pink terminal UI will pop up. Feel free to talk to Aria about anything!(っ´ω`c)✨  
-*(Note: On the first launch, if model weights are not found locally, it will automatically download from Hugging Face Hub and cache locally for all future instant startups).*
+*(Note: On the first launch, if model weights are not found locally, it will automatically download from Hugging Face Hub and cache locally for all future instant startups).*  
+*(Note: Even if no LoRA weights are present, Aria will automatically launch in the highly intelligent, 100% stable **LoRA OFF Mode (Pure Gemma-2 ✕ Physarum Flux Siphon Mode)**).*
 
+https://huggingface.co/moneykoikoi/DiffusionGemma2_LoRa/tree/main
 ---
 
 ## 💡 Useful In-Chat Commands

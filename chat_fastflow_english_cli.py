@@ -53,12 +53,6 @@ if not os.path.exists(KNOWLEDGE_FILE):
 DEFAULT_HF_MODEL = "rinna/gemma-2-baku-2b-it"
 
 MODEL_DIR = os.path.join(BASE_DIR, "models", "gemma-2-baku-2b-it")
-LORA_DIR = os.path.join(BASE_DIR, "models", "dgemma_lora_en_clean")
-if not os.path.exists(LORA_DIR):
-    LORA_DIR = os.path.join(BASE_DIR, "models", "dgemma_lora_en")
-if not os.path.exists(LORA_DIR):
-    LORA_DIR = os.path.join(BASE_DIR, "models", "dgemma_lora_ja_clean")
-
 if not os.path.exists(MODEL_DIR):
     STUDIO33_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "33_Aria_Diffusion_Qwen_Super_Fast_Studio"))
     candidate_model = os.path.join(STUDIO33_DIR, "models", "gemma-2-baku-2b-it")
@@ -67,10 +61,21 @@ if not os.path.exists(MODEL_DIR):
     else:
         MODEL_DIR = DEFAULT_HF_MODEL
 
-    if not os.path.exists(LORA_DIR):
-        candidate_lora = os.path.join(STUDIO33_DIR, "models", "dgemma_lora_home")
-        if os.path.exists(candidate_lora):
-            LORA_DIR = candidate_lora
+# Deterministic LoRA candidate scan (Clean English -> English -> Japanese clean)
+lora_candidates = [
+    os.path.join(BASE_DIR, "models", "dgemma_lora_en_clean"),
+    os.path.join(BASE_DIR, "models", "dgemma_lora_en"),
+    os.path.join(BASE_DIR, "models", "dgemma_lora_ja_clean"),
+]
+LORA_DIR = None
+for cand in lora_candidates:
+    if os.path.exists(cand) and (
+        os.path.exists(os.path.join(cand, "adapter_config.json")) or
+        os.path.exists(os.path.join(cand, "adapter_model.safetensors")) or
+        os.path.exists(os.path.join(cand, "adapter_model.bin"))
+    ):
+        LORA_DIR = cand
+        break
 
 # ANSI Color Palette
 C_ROSE = "\033[38;2;255;105;180m"
@@ -518,14 +523,10 @@ def main():
     mask_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
     dlm = DiffusionGemmaLM(base_model, tokenizer, mask_token_id=mask_token_id)
 
-    has_lora = os.path.exists(LORA_DIR) and (
-        os.path.exists(os.path.join(LORA_DIR, "adapter_config.json")) or
-        os.path.exists(os.path.join(LORA_DIR, "adapter_model.safetensors")) or
-        os.path.exists(os.path.join(LORA_DIR, "adapter_model.bin"))
-    )
+    has_lora = (LORA_DIR is not None)
 
     if has_lora:
-        print(f"{C_CYAN}[2/2] Attaching LoRA & Mask Embeddings...{C_RESET}")
+        print(f"{C_CYAN}[2/2] Attaching LoRA & Mask Embeddings ({os.path.basename(LORA_DIR)})...{C_RESET}")
         try:
             dlm.model = PeftModel.from_pretrained(dlm.model, LORA_DIR)
             dlm.eval()
@@ -539,7 +540,10 @@ def main():
             print(f"{C_GOLD}⚠️ Failed to attach LoRA weights, falling back to Pure mode: {e}{C_RESET}")
             has_lora = False
     else:
-        print(f"{C_GOLD}[2/2] Diffusion LoRA not detected -> Launching in Pure Gemma-2 ✕ Physarum Flux Siphon Mode 🌸{C_RESET}")
+        print(f"{C_GREEN}[2/2] 💡 LoRA weights not detected -> Automatically launching in LoRA OFF Mode (Pure Gemma-2 ✕ Physarum Flux Siphon Mode)! 👑🌸{C_RESET}")
+
+    # Set initial causal mask based on LoRA availability
+    patch_gemma_causal(base_model, is_causal=(not has_lora))
 
     drafter = FastDiffusionRAGDrafter(tokenizer, json_path=KNOWLEDGE_FILE)
     siphon = PhysarumFluxSiphon(knowledge_file=KNOWLEDGE_FILE)
