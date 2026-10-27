@@ -3,7 +3,7 @@
 # 🌸 Aria-FastFlow (アリア・ファストフロー)
 ### お家のパソコンで動く、超光速デスクトップAIアシスタント！ 🚀✨
 
-[ **日本語** ](README_jp.md) | [ **English** ](README_EN.md)
+[ **日本語** ](README_jp.md) | [ **English** ](README.md)
 
 </div>
 
