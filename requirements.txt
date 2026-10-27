@@ -1,0 +1,7 @@
+# Studio 34: Aria-FastFlow Ultra-Fast Desktop AI Studio Requirements
+torch>=2.2.0
+transformers>=4.40.0
+bitsandbytes>=0.43.0
+peft>=0.10.0
+accelerate>=0.28.0
+sentencepiece>=0.2.0
